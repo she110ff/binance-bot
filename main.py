@@ -53,6 +53,22 @@ def create_order():
             'stopPrice': 57000
         }
     )
+@app.route('/tradingView/v1', methods=['POST'])
+def handle_webhook():
+    if request.method == 'POST':
+        # TradingView에서 보낸 JSON 데이터를 파싱합니다.
+        data = request.get_json()
+
+        # 파싱된 데이터에서 필요한 정보를 추출합니다.
+        symbol = data['symbol']
+        strategy = data['strategy']
+        signal = data['signal']
+
+        # 추출한 정보를 사용하여 필요한 작업을 수행합니다.
+        message = f"New signal from {symbol} ({strategy}): {signal}"
+        print(message)
+        # TradingView 알림(alert)을 Gmail로 보내기
+        send_email('New signal from TradingView', message, 'youngsoo.j@gmail.com')
 
 @app.route('/price', methods=['GET'])
 def get_price():
