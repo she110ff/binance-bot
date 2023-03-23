@@ -1,6 +1,9 @@
 from flask import Flask, jsonify
 import ccxt
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 
 # .env 파일에서 환경 변수를 로드합니다.
@@ -56,6 +59,9 @@ def get_price():
     # 현재가 조회
     ticker = binance.fetch_ticker('BTCUSDT')
     price = ticker['last']
+
+    # TradingView 알림(alert)을 Gmail로 보내기
+    send_email('New signal from TradingView', 'New signal detected!', 'youngsoo.j@gmail.com')
     return jsonify(price)
 
 @app.route('/balance', methods=['GET'])
@@ -69,5 +75,31 @@ def get_balance():
 
     return jsonify(balance)
 
+
+def send_email(subject, body, to):
+    # 이메일 설정
+    email = os.environ.get('mail')  # 발신자 Gmail 계정 이메일 주소
+    password = os.environ.get('mail_pwd')  # 발신자 Gmail 계정 비밀번호
+
+    # 이메일 서버 설정
+    smtp_server = 'smtp.gmail.com'  # Gmail SMTP 서버
+    smtp_port = 587  # Gmail SMTP 서버 포트 번호
+
+    # 이메일 생성
+    msg = MIMEMultipart()
+    msg['From'] = email
+    msg['To'] = to
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    # 이메일 보내기
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.ehlo()
+        server.starttls()
+        server.login(email, password)
+        server.sendmail(email, to, msg.as_string())
+
+
+
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=80)
