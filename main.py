@@ -10,17 +10,20 @@ from dotenv import load_dotenv
 
 # .env 파일에서 환경 변수를 로드합니다.
 load_dotenv()
-
+mode = os.environ.get('mode')
 
 app = Flask(__name__)
 exchange = ccxt.binanceusdm({
-    'apiKey': os.environ.get('apiKey'),
-    'secret': os.environ.get('secret'),
+    'apiKey': os.environ.get('testApiKey') if mode == 'prod' else  os.environ.get('apiKey'),
+    'secret': os.environ.get('testSecret') if mode == 'prod' else  os.environ.get('secret'),
     'enableRateLimit': True,
     'options': {
-        'defaultType': 'future'
+        'defaultType': 'future',
+        'test': True
     }
 })
+if mode != 'prod':
+    exchange.set_sandbox_mode(True)
 
 _symbol = 'BTC/USDT'
 
@@ -47,7 +50,7 @@ def _create_order():
     symbol = _symbol
     side = 'buy'
     inverted_side = 'sell' if side == 'buy' else 'buy'
-    amount = 0.001
+    amount = 1
     price = None
     ticker = exchange.fetch_ticker(_symbol)
     cprice = ticker['last']
@@ -57,18 +60,19 @@ def _create_order():
     message = f"order> symbol: {symbol}, side:{side}, amount:{amount}, \
     cprice:{cprice}, stopLossPrice:{stopLossPrice}, takeProfitPrice:{takeProfitPrice}"
     pprint.pprint(message)
+    params = {'test': True}
+    order = exchange.create_order(symbol, 'MARKET', side, amount, params)
+    pprint.pprint(order)
+
+    stopLossParams = {'stopPrice': stopLossPrice}
+    stopLossOrder = exchange.create_order(symbol, 'STOP_MARKET', inverted_side, amount, price, stopLossParams)
+    pprint.pprint(stopLossOrder)
+
+    takeProfitParams = {'stopPrice': takeProfitPrice}
+    takeProfitOrder = exchange.create_order(symbol, 'TAKE_PROFIT_MARKET', inverted_side, amount, price, takeProfitParams)
+    pprint.pprint(takeProfitOrder)
     return 'order'
-    # order = exchange.create_order(symbol, 'MARKET', side, amount)
-    # pprint.pprint(order)
-    #
-    #
-    # stopLossParams = {'stopPrice': stopLossPrice}
-    # stopLossOrder = exchange.create_order(symbol, 'STOP_MARKET', inverted_side, amount, price, stopLossParams)
-    # pprint.pprint(stopLossOrder)
-    #
-    # takeProfitParams = {'stopPrice': takeProfitPrice}
-    # takeProfitOrder = exchange.create_order(symbol, 'TAKE_PROFIT_MARKET', inverted_side, amount, price, takeProfitParams)
-    # pprint.pprint(takeProfitOrder)
+
 
 
 @app.route('/tradingView/v1', methods=['POST'])
