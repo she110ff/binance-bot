@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, abort
 import ccxt
 import os
 import smtplib
@@ -11,15 +11,16 @@ from dotenv import load_dotenv
 # .env 파일에서 환경 변수를 로드합니다.
 load_dotenv()
 mode = os.environ.get('mode')
+userKey = os.environ.get('userKey')
+pprint.pprint(mode)
 
 app = Flask(__name__)
 exchange = ccxt.binanceusdm({
-    'apiKey': os.environ.get('testApiKey') if mode == 'prod' else  os.environ.get('apiKey'),
-    'secret': os.environ.get('testSecret') if mode == 'prod' else  os.environ.get('secret'),
+    'apiKey': os.environ.get('apiKey') if mode == 'prod' else os.environ.get('testApiKey'),
+    'secret': os.environ.get('secret') if mode == 'prod' else os.environ.get('testSecret'),
     'enableRateLimit': True,
     'options': {
         'defaultType': 'future',
-        'test': True
     }
 })
 if mode != 'prod':
@@ -27,6 +28,17 @@ if mode != 'prod':
 
 _symbol = 'BTC/USDT'
 
+
+# 미들웨어 함수 작성
+@app.before_request
+def before_request():
+    # 인증된 사용자인지 확인하기
+    if 'user_id' in request.view_args:
+        user_id = request.view_args['user_id']
+        if user_id != userKey:  # 인증된 사용자의 user_id
+            abort(403, 'Forbidden')
+    else:
+        abort(403, 'Forbidden')
 
 def _get_position():
     # 포지션 조회
@@ -60,7 +72,7 @@ def _create_order():
     message = f"order> symbol: {symbol}, side:{side}, amount:{amount}, \
     cprice:{cprice}, stopLossPrice:{stopLossPrice}, takeProfitPrice:{takeProfitPrice}"
     pprint.pprint(message)
-    params = {'test': True}
+    params = {} if mode == 'prod' else {'test': True}
     order = exchange.create_order(symbol, 'MARKET', side, amount, params)
     pprint.pprint(order)
 
@@ -75,8 +87,8 @@ def _create_order():
 
 
 
-@app.route('/tradingView/v1', methods=['POST'])
-def handle_webhook():
+@app.route('/tradingView/v1/<user_id>', methods=['POST'])
+def handle_webhook(user_id):
     if request.method == 'POST':
         # TradingView에서 보낸 JSON 데이터를 파싱합니다.
         data = request.get_json()
@@ -96,8 +108,8 @@ def handle_webhook():
         return '{"ret":"success"}'
 
 
-@app.route('/price', methods=['GET'])
-def get_price():
+@app.route('/price/<user_id>', methods=['GET'])
+def get_price(user_id):
     # 현재가 조회
     ticker = exchange.fetch_ticker(_symbol)
     price = ticker['last']
@@ -107,14 +119,14 @@ def get_price():
     return jsonify(price)
 
 
-@app.route('/positino', methods=['GET'])
-def get_position():
+@app.route('/position/<user_id>', methods=['GET'])
+def get_position(user_id):
     position = _get_position()
     return jsonify(position)
 
 
-@app.route('/balance', methods=['GET'])
-def get_balance():
+@app.route('/balance/<user_id>', methods=['GET'])
+def get_balance(user_id):
     # 계좌 잔고 조회
     balance = _get_balance()
     # 잔액이 0이 아닌 자산만 출력
@@ -147,6 +159,7 @@ def send_email(subject, body, to):
         server.starttls()
         server.login(email, password)
         server.sendmail(email, to, msg.as_string())
+
 
 
 
