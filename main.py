@@ -3,7 +3,7 @@ import ccxt
 import os
 import smtplib
 import pprint
-from builtins import int
+from builtins import int, float
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
@@ -15,18 +15,20 @@ userKey = os.environ.get('userKey')
 pprint.pprint(mode)
 
 app = Flask(__name__)
+
 exchange = ccxt.binanceusdm({
     'apiKey': os.environ.get('apiKey') if mode == 'prod' else os.environ.get('testApiKey'),
     'secret': os.environ.get('secret') if mode == 'prod' else os.environ.get('testSecret'),
     'enableRateLimit': True,
     'options': {
         'defaultType': 'future',
+        'test': True
     }
 })
 if mode != 'prod':
     exchange.set_sandbox_mode(True)
 
-_symbol = 'BTC/USDT'
+_symbol = 'BTCUSDT'
 
 
 # 미들웨어 함수 작성
@@ -42,13 +44,14 @@ def before_request():
 
 def _get_position():
     # 포지션 조회
-    balance = exchange.fetch_balance()
-    positions = balance['info']['positions']
-
-    for position in positions:
-        if position["symbol"] == _symbol:
-            pprint.pprint(position)
-    return position
+    positions = exchange.fapiPrivateGetPositionRisk({
+        'symbol': _symbol,
+        'positionSide': 'BOTH'
+    })
+    # for position in positions:
+    #     if position["symbol"] == _symbol:
+    #         pprint.pprint(position)
+    return positions
 
 
 def _get_balance():
@@ -66,13 +69,13 @@ def _create_order():
     price = None
     ticker = exchange.fetch_ticker(_symbol)
     cprice = ticker['last']
-    stopLossPrice = int(cprice - (cprice * 0.01))
+    stopLossPrice = int(cprice - (cprice * 0.05))
     takeProfitPrice = int(cprice + (cprice * 0.1))
 
     message = f"order> symbol: {symbol}, side:{side}, amount:{amount}, \
     cprice:{cprice}, stopLossPrice:{stopLossPrice}, takeProfitPrice:{takeProfitPrice}"
     pprint.pprint(message)
-    params = {} if mode == 'prod' else {'test': True}
+    params = {}  # if mode == 'prod' else {'test': True}
     order = exchange.create_order(symbol, 'MARKET', side, amount, params)
     pprint.pprint(order)
 
@@ -102,11 +105,31 @@ def handle_webhook(user_id):
         message = f"New signal from {symbol} ({strategy}): {signal}"
         pprint.pprint(message)
 
-        _create_order()
+        if signal == 'buy':
+            _create_order()
+        else:
+            _close_all_positions()
         # TradingView 알림(alert)을 Gmail로 보내기
         send_email('New signal from TradingView', message, 'youngsoo.j@gmail.com')
         return '{"ret":"success"}'
 
+# 모든 포지션 청산 함수
+def _close_all_positions():
+    # Fetch all open positions
+    open_positions = _get_position()
+
+    # Close all open positions
+    for position in open_positions:
+        symbol = position['symbol']
+        side = 'BUY' if float(position['positionAmt']) < 0 else 'SELL'
+        quantity = abs(float(position['positionAmt']))
+
+        if quantity > 0:
+            try:
+                order = exchange.create_market_order(symbol, side, quantity)
+                pprint.pprint(f"Closed position for {symbol} with order: {order}")
+            except Exception as e:
+                pprint.pprint(f"Error closing position for {symbol}: {e}")
 
 @app.route('/price/<user_id>', methods=['GET'])
 def get_price(user_id):
