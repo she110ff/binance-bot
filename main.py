@@ -1,7 +1,9 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import ccxt
 import os
 import smtplib
+import pprint
+from builtins import int
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
@@ -11,7 +13,7 @@ load_dotenv()
 
 
 app = Flask(__name__)
-binance = ccxt.binance({
+exchange = ccxt.binanceusdm({
     'apiKey': os.environ.get('apiKey'),
     'secret': os.environ.get('secret'),
     'enableRateLimit': True,
@@ -20,45 +22,61 @@ binance = ccxt.binance({
     }
 })
 
-def create_order():
+_symbol = 'BTC/USDT'
+
+
+def _get_position():
+    # 포지션 조회
+    balance = exchange.fetch_balance()
+    positions = balance['info']['positions']
+
+    for position in positions:
+        if position["symbol"] == _symbol:
+            pprint.pprint(position)
+    return position
+
+
+def _get_balance():
+    # 계좌 잔고 조회
+    balance = exchange.fetch_balance()
+    return balance
+
+
+def _create_order():
     # 마진 20배로 BTCUSDT 선물 매수 주문
-    order = binance.create_order(
-        symbol='BTC/USDT',
-        type='market',
-        side='buy',
-        amount=0.001,
-        leverage=20
-    )
+    symbol = _symbol
+    side = 'buy'
+    inverted_side = 'sell' if side == 'buy' else 'buy'
+    amount = 0.001
+    price = None
+    ticker = exchange.fetch_ticker(_symbol)
+    cprice = ticker['last']
+    stopLossPrice = int(cprice - (cprice * 0.01))
+    takeProfitPrice = int(cprice + (cprice * 0.1))
 
-    # take-profit 주문
-    take_profit_order = binance.create_order(
-        symbol='BTC/USDT',
-        type='take_profit',
-        side='sell',
-        amount=0.001,
-        price=60000,
-        params={
-            'stopPrice': 59000
-        }
-    )
+    message = f"order> symbol: {symbol}, side:{side}, amount:{amount}, \
+    cprice:{cprice}, stopLossPrice:{stopLossPrice}, takeProfitPrice:{takeProfitPrice}"
+    pprint.pprint(message)
+    return 'order'
+    # order = exchange.create_order(symbol, 'MARKET', side, amount)
+    # pprint.pprint(order)
+    #
+    #
+    # stopLossParams = {'stopPrice': stopLossPrice}
+    # stopLossOrder = exchange.create_order(symbol, 'STOP_MARKET', inverted_side, amount, price, stopLossParams)
+    # pprint.pprint(stopLossOrder)
+    #
+    # takeProfitParams = {'stopPrice': takeProfitPrice}
+    # takeProfitOrder = exchange.create_order(symbol, 'TAKE_PROFIT_MARKET', inverted_side, amount, price, takeProfitParams)
+    # pprint.pprint(takeProfitOrder)
 
-    # stop-loss 주문
-    stop_loss_order = binance.create_order(
-        symbol='BTC/USDT',
-        type='stop_loss',
-        side='sell',
-        amount=0.001,
-        price=57000,
-        params={
-            'stopPrice': 57000
-        }
-    )
+
 @app.route('/tradingView/v1', methods=['POST'])
 def handle_webhook():
     if request.method == 'POST':
         # TradingView에서 보낸 JSON 데이터를 파싱합니다.
         data = request.get_json()
-
+        pprint.pprint(data)
         # 파싱된 데이터에서 필요한 정보를 추출합니다.
         symbol = data['symbol']
         strategy = data['strategy']
@@ -66,28 +84,39 @@ def handle_webhook():
 
         # 추출한 정보를 사용하여 필요한 작업을 수행합니다.
         message = f"New signal from {symbol} ({strategy}): {signal}"
-        print(message)
+        pprint.pprint(message)
+
+        _create_order()
         # TradingView 알림(alert)을 Gmail로 보내기
         send_email('New signal from TradingView', message, 'youngsoo.j@gmail.com')
+        return '{"ret":"success"}'
+
 
 @app.route('/price', methods=['GET'])
 def get_price():
     # 현재가 조회
-    ticker = binance.fetch_ticker('BTCUSDT')
+    ticker = exchange.fetch_ticker(_symbol)
     price = ticker['last']
 
     # TradingView 알림(alert)을 Gmail로 보내기
     send_email('New signal from TradingView', 'New signal detected!', 'youngsoo.j@gmail.com')
     return jsonify(price)
 
+
+@app.route('/positino', methods=['GET'])
+def get_position():
+    position = _get_position()
+    return jsonify(position)
+
+
 @app.route('/balance', methods=['GET'])
 def get_balance():
     # 계좌 잔고 조회
-    balance = binance.fetch_balance()
+    balance = _get_balance()
     # 잔액이 0이 아닌 자산만 출력
     for asset in balance['total']:
         if balance['total'][asset] != 0:
-            print(f"{asset}: {balance['total'][asset]}")
+            pprint.pprint(f"{asset}: {balance['total'][asset]}")
 
     return jsonify(balance)
 
